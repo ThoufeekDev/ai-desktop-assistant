@@ -1,5 +1,5 @@
 
-"""Minimal client for the local Ollama chat API."""
+"""Client for the local Ollama chat API."""
 
 import json
 from urllib.error import HTTPError, URLError
@@ -11,30 +11,58 @@ class OllamaError(RuntimeError):
 
 
 class OllamaClient:
-    """Send chat messages to Ollama with in-memory conversation history."""
+    """Send chat messages to Ollama with bounded conversation history."""
 
     def __init__(
         self,
         base_url: str = "http://127.0.0.1:11434",
         model: str = "qwen2.5:3b-instruct",
         timeout: float = 120.0,
+        system_prompt: str = (
+            "You are FRIDAY, a helpful local AI assistant running on Linux. "
+            "Be accurate, practical, concise, and transparent about uncertainty. "
+            "Never claim to have performed an action you have not performed."
+        ),
+        max_history_turns: int = 10,
     ) -> None:
+        if not isinstance(system_prompt, str) or not system_prompt.strip():
+            raise ValueError("System prompt cannot be empty.")
+
+        if (
+            isinstance(max_history_turns, bool)
+            or not isinstance(max_history_turns, int)
+            or max_history_turns < 1
+        ):
+            raise ValueError(
+                "max_history_turns must be an integer of at least 1."
+            )
+
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout = timeout
+        self.system_prompt = system_prompt.strip()
+        self.max_history_turns = max_history_turns
         self.messages: list[dict[str, str]] = []
 
     def chat(self, message: str) -> str:
         """Send a message and preserve successful conversation turns."""
-        if not message.strip():
+        if not isinstance(message, str) or not message.strip():
             raise ValueError("Message cannot be empty.")
 
         user_message = {"role": "user", "content": message.strip()}
-        pending_messages = [*self.messages, user_message]
+
+        # Stored history contains complete user/assistant pairs.
+        bounded_history = self.messages[-(self.max_history_turns * 2):]
+
+        request_messages = [
+            {"role": "system", "content": self.system_prompt},
+            *bounded_history,
+            user_message,
+        ]
 
         payload = {
             "model": self.model,
-            "messages": pending_messages,
+            "messages": request_messages,
             "stream": False,
         }
 
@@ -70,13 +98,17 @@ class OllamaClient:
 
         reply = content.strip()
 
-        # Save the turn only after a valid assistant reply is received.
+        # Store only successful exchanges.
         self.messages.extend(
             [
                 user_message,
                 {"role": "assistant", "content": reply},
             ]
         )
+
+        # Retain the newest complete turns.
+        history_limit = self.max_history_turns * 2
+        self.messages = self.messages[-history_limit:]
 
         return reply
 

@@ -22,6 +22,8 @@ class CliTests(unittest.TestCase):
                 base_url="http://localhost:11434",
                 model="test-model",
                 timeout=30.0,
+                system_prompt="Test assistant prompt",
+                max_history_turns=5,
             )
         )
 
@@ -35,8 +37,12 @@ class CliTests(unittest.TestCase):
             base_url="http://localhost:11434",
             model="test-model",
             timeout=30.0,
+            system_prompt="Test assistant prompt",
+            max_history_turns=5,
         )
+
         mock_client_class.return_value.chat.assert_called_once_with("Hello")
+
         mock_print.assert_any_call(
             "Local AI assistant — model: test-model"
         )

@@ -56,6 +56,7 @@ class OllamaClientTests(unittest.TestCase):
         self.assertEqual(
             payload["messages"],
             [
+                {"role": "system", "content": client.system_prompt},
                 {"role": "user", "content": "What is Node.js?"},
                 {
                     "role": "assistant",

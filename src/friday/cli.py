@@ -1,4 +1,3 @@
-
 """Command-line entry point for FRIDAY."""
 
 from importlib.metadata import PackageNotFoundError, version
@@ -28,6 +27,8 @@ def main() -> None:
         base_url=config.ollama.base_url,
         model=config.ollama.model,
         timeout=config.ollama.timeout,
+        system_prompt=config.ollama.system_prompt,
+        max_history_turns=config.ollama.max_history_turns,
     )
 
     while True:
