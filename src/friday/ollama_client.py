@@ -77,6 +77,23 @@ class OllamaClient:
             with urlopen(request, timeout=self.timeout) as response:
                 result = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
+            try:
+                error_data = json.loads(exc.read().decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+                error_data = {}
+
+            error_message = (
+                error_data.get("error")
+                if isinstance(error_data, dict)
+                else None
+            )
+
+            if isinstance(error_message, str) and error_message.strip():
+                detail = error_message.strip()
+                raise OllamaError(
+                    f"Ollama returned HTTP {exc.code}: {detail}"
+                ) from exc
+
             raise OllamaError(
                 f"Ollama returned HTTP {exc.code}."
             ) from exc
@@ -94,7 +111,9 @@ class OllamaClient:
 
         content = message_data.get("content")
         if not isinstance(content, str) or not content.strip():
-            raise OllamaError("Ollama returned empty or invalid message content.")
+            raise OllamaError(
+                "Ollama returned empty or invalid message content."
+            )
 
         reply = content.strip()
 

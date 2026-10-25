@@ -3,8 +3,9 @@
 
 import json
 import unittest
+from io import BytesIO
 from unittest.mock import patch
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 
 from friday.ollama_client import OllamaClient, OllamaError
 
@@ -66,6 +67,34 @@ class OllamaClientTests(unittest.TestCase):
             ],
         )
 
+
+    def test_chat_rejects_invalid_json(self) -> None:
+        with patch("friday.ollama_client.urlopen") as mock_urlopen:
+            response = mock_urlopen.return_value.__enter__.return_value
+            response.read.return_value = b"not valid JSON"
+
+            with self.assertRaisesRegex(OllamaError, "invalid JSON"):
+                OllamaClient().chat("Hello")
+
+    def test_chat_rejects_response_without_message(self) -> None:
+        with patch("friday.ollama_client.urlopen") as mock_urlopen:
+            response = mock_urlopen.return_value.__enter__.return_value
+            response.read.return_value = json.dumps(
+                {"unexpected": "response"}
+            ).encode("utf-8")
+
+            with self.assertRaisesRegex(OllamaError, "did not contain a message"):
+                OllamaClient().chat("Hello")
+
+    def test_chat_rejects_empty_assistant_content(self) -> None:
+        with patch("friday.ollama_client.urlopen") as mock_urlopen:
+            response = mock_urlopen.return_value.__enter__.return_value
+            response.read.return_value = mock_response("   ")
+
+            with self.assertRaisesRegex(OllamaError, "empty or invalid"):
+                OllamaClient().chat("Hello")
+
+
     def test_reset_conversation_clears_history(self) -> None:
         with patch("friday.ollama_client.urlopen") as mock_urlopen:
             response = mock_urlopen.return_value.__enter__.return_value
@@ -90,5 +119,25 @@ class OllamaClientTests(unittest.TestCase):
         self.assertEqual(client.messages, [])
 
 
-if __name__ == "__main__":
-    unittest.main()
+
+    def test_chat_includes_http_error_detail(self) -> None:
+        error_body = json.dumps(
+            {"error": "model not found"}
+        ).encode("utf-8")
+
+        http_error = HTTPError(
+            url="http://127.0.0.1:11434/api/chat",
+            code=404,
+            msg="Not Found",
+            hdrs=None,
+            fp=BytesIO(error_body),
+        )
+
+        with patch(
+            "friday.ollama_client.urlopen",
+            side_effect=http_error,
+        ):
+            with self.assertRaisesRegex(
+                OllamaError, "HTTP 404: model not found"
+            ):
+                OllamaClient().chat("Hello")
