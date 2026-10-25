@@ -115,5 +115,31 @@ timeout = 60
                 load_config(config_path)
 
 
+    def test_base_url_without_scheme_is_rejected(self) -> None:
+        self.assert_invalid_config('base_url = "localhost:11434"')
+
+    def test_base_url_without_hostname_is_rejected(self) -> None:
+        self.assert_invalid_config('base_url = "http://"')
+
+    def test_base_url_with_invalid_port_is_rejected(self) -> None:
+        self.assert_invalid_config('base_url = "http://localhost:invalid"')
+
+    def test_https_base_url_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.toml"
+            config_path.write_text(
+                '[ollama]\nbase_url = "https://localhost:11434/"\n',
+                encoding="utf-8",
+            )
+
+            config = load_config(config_path)
+
+        self.assertEqual(
+            config.ollama.base_url,
+            "https://localhost:11434",
+        )
+
+
+
 if __name__ == "__main__":
     unittest.main()
