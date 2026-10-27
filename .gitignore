@@ -21,3 +21,10 @@ dist/
 # Local tooling
 .mypy_cache/
 .ruff_cache/
+
+
+
+backups/
+models/
+# Local models
+models/
