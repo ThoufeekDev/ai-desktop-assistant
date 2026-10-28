@@ -81,12 +81,14 @@ class TextToSpeech:
             self._cancelled_pids.add(process.pid)
 
             try:
+                print(f"JARVIS DEBUG: stopping player PID {process.pid}")
                 process.terminate()
-            except OSError:
-                pass
+            except OSError as exc:
+                print(f"JARVIS DEBUG: terminate failed: {exc}")
 
         try:
             process.wait(timeout=2.0)
+            print(f"JARVIS DEBUG: player exit code {process.poll()}")            
         except (subprocess.TimeoutExpired, OSError):
             try:
                 process.kill()

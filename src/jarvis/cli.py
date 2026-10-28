@@ -12,6 +12,7 @@ from jarvis.ollama_client import OllamaClient, OllamaError
 from jarvis.package_manager import PackageManager, parse_install_request
 from jarvis.speech_to_text import SpeechToText
 from jarvis.text_to_speech import TextToSpeech
+from jarvis.intent_parser import parse_desktop_intent
 from jarvis.desktop_intent import (
     parse_close_app_request,
     parse_open_app_request,
@@ -55,6 +56,22 @@ STOP_PHRASES = {
     "exit voice mode",
     "go back to text mode",
     "return to text mode",
+}
+
+SILENCE_PHRASES = {
+    "stop",
+    "stop jarvis",
+    "jarvis stop",
+    "okay enough",
+    "ok enough",
+    "enough",
+    "that's enough",
+    "thats enough",
+    "be quiet",
+    "quiet jarvis",
+    "stop talking",
+    "please stop",
+    "shut up",
 }
 
 CONFIRMATION_PHRASES = {
@@ -260,7 +277,7 @@ def main() -> None:
 
 
     def speak_response(text: str) -> None:
-        """Speak a response and queue any user interruption."""
+        """Speak a response and handle any user speech during playback."""
         if speaker is None or not speak_enabled:
             return
 
@@ -291,8 +308,16 @@ def main() -> None:
     while True:
         if pending_voice_messages:
             message = pending_voice_messages.popleft()
-            command = message.strip().lower()
-            print(f"You (interruption): {message}")
+            command = " ".join(
+                message.lower()
+                .replace(",", " ")
+                .replace(".", " ")
+                .split()
+            )
+            print(f"You: {message}")
+
+            if command in SILENCE_PHRASES:
+                continue
 
             if command in STOP_PHRASES:
                 voice_mode = False
@@ -1327,6 +1352,171 @@ def main() -> None:
                     print(f"JARVIS: Could not speak the response: {exc}")
 
             continue
+
+
+
+        # Interpret unmatched desktop-related requests with local Ollama.
+        desktop_keywords = re.search(
+            r"\b(workspace|monitor|screen|window|application|apps?|desktop|"
+            r"open|launch|start|run|browser|chrome|terminal|vscode|code|"
+            r"shutdown|shut down|poweroff|power off|turn off|"
+            r"shut off|reboot|restart|restarting|system|computer|pc|laptop)\b",
+            normalized_message,
+        )
+
+        if desktop_keywords:
+            intent = parse_desktop_intent(client, message)
+
+            if intent is not None:
+                control = LinuxControl()
+                action_reply = None
+
+                if intent.action == "shutdown_system":
+                    action_reply = "Shutting down the system."
+                    print(f"\nJARVIS: {action_reply}\n")
+
+                    if speak_enabled and speaker is not None:
+                        try:
+                            speak_response(action_reply)
+                        except (RuntimeError, OSError) as exc:
+                            print(
+                                "JARVIS: Could not speak the response: "
+                                f"{exc}"
+                            )
+
+                    action_reply = control.shutdown_system()
+
+                elif intent.action == "reboot_system":
+                    action_reply = "Restarting the system."
+                    print(f"\nJARVIS: {action_reply}\n")
+
+                    if speak_enabled and speaker is not None:
+                        try:
+                            speak_response(action_reply)
+                        except (RuntimeError, OSError) as exc:
+                            print(
+                                "JARVIS: Could not speak the response: "
+                                f"{exc}"
+                            )
+
+                    action_reply = control.reboot_system()
+
+                elif intent.action == "open_app":
+                    app_name = intent.app_name
+                    destination = intent.destination
+                    workspace = intent.workspace
+                    output = intent.output
+
+                    if app_name is None:
+                        action_reply = (
+                            "I couldn't identify which application to open."
+                        )
+                    elif app_name.casefold() in {
+                        "browser",
+                        "default browser",
+                        "web browser",
+                        "internet browser",
+                    }:
+                        action_reply = control.open_default_browser(
+                            destination,
+                            workspace,
+                            output,
+                        )
+                    elif app_name.casefold() in {
+                        "terminal",
+                        "command line",
+                        "commandline",
+                        "shell",
+                        "console",
+                    }:
+                        action_reply = control.open_preferred_terminal(
+                            destination,
+                            workspace,
+                            output,
+                        )
+                    else:
+                        action_reply = control.open_app(
+                            app_name,
+                            destination,
+                            workspace,
+                            output,
+                        )
+
+                elif intent.action == "switch_workspace":
+                    action_reply = control.switch_workspace(
+                        intent.workspace
+                    )
+
+                elif intent.action == "get_current_workspace":
+                    workspace_info = control.get_current_workspace()
+
+                    if workspace_info is None:
+                        action_reply = (
+                            "I couldn't determine your current workspace."
+                        )
+                    else:
+                        workspace_number = workspace_info.get(
+                            "idx", "unknown"
+                        )
+                        output_name = (
+                            workspace_info.get("output")
+                            or "unknown monitor"
+                        )
+                        action_reply = (
+                            f"You are on workspace {workspace_number} "
+                            f"on monitor {output_name}."
+                        )
+
+                elif intent.action == "get_focused_window":
+                    window = control.get_focused_window()
+
+                    if window is None:
+                        action_reply = (
+                            "I couldn't determine which window is focused."
+                        )
+                    else:
+                        app_id = window.get("app_id") or "Unknown application"
+                        title = window.get("title") or "Untitled window"
+                        action_reply = (
+                            f"The focused application is {app_id}. "
+                            f"The current window is {title}."
+                        )
+
+                elif intent.action == "list_windows":
+                    windows = control.list_windows()
+
+                    if not windows:
+                        action_reply = "I couldn't find any open windows."
+                    else:
+                        descriptions = [
+                            f"{index}. "
+                            f"{window.get('title') or window.get('app_id') or 'Untitled window'}"
+                            for index, window in enumerate(windows, start=1)
+                        ]
+                        action_reply = (
+                            "These are your open windows: "
+                            + "; ".join(descriptions)
+                        )
+
+                elif intent.action == "unclear":
+                    action_reply = (
+                        "I'm not sure which desktop action you mean. "
+                        "Could you clarify your request?"
+                    )
+
+                if action_reply is not None:
+                    print(f"\nJARVIS: {action_reply}\n")
+
+                    if speak_enabled and speaker is not None:
+                        try:
+                            speak_response(action_reply)
+                        except (RuntimeError, OSError) as exc:
+                            print(
+                                "JARVIS: Could not speak the response: "
+                                f"{exc}"
+                            )
+
+                    continue
 
 
         # Retrieve relevant long-term memories for ordinary AI questions.

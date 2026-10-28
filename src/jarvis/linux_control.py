@@ -525,6 +525,52 @@ class LinuxControl:
 
         return windows
 
+    def shutdown_system(self) -> str:
+        """Request a system shutdown after explicit user confirmation."""
+        try:
+            result = subprocess.run(
+                ["systemctl", "poweroff"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            return f"Couldn't shut down the system: {exc}"
+
+        if result.returncode != 0:
+            details = result.stderr.strip()
+            return (
+                f"Shutdown request failed: {details}"
+                if details
+                else "The shutdown request failed."
+            )
+
+        return "The system shutdown request was accepted."
+
+    def reboot_system(self) -> str:
+        """Request a system reboot after explicit user confirmation."""
+        try:
+            result = subprocess.run(
+                ["systemctl", "reboot"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            return f"Couldn't reboot the system: {exc}"
+
+        if result.returncode != 0:
+            details = result.stderr.strip()
+            return (
+                f"Reboot request failed: {details}"
+                if details
+                else "The reboot request failed."
+            )
+
+        return "The system reboot request was accepted."
+
     def close_window(self, window_id: str) -> str:
         """Close a specific Niri window by its ID."""
         if not window_id.isdigit():

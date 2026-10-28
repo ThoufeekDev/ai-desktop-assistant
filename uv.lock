@@ -132,37 +132,6 @@ wheels = [
 ]
 
 [[package]]
-name = "friday"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "faster-whisper" },
-    { name = "nvidia-cublas-cu12" },
-    { name = "nvidia-cudnn-cu12" },
-    { name = "openwakeword" },
-    { name = "piper-tts" },
-    { name = "sounddevice" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "faster-whisper", specifier = ">=1.2.1" },
-    { name = "nvidia-cublas-cu12", specifier = ">=12.9.2.10" },
-    { name = "nvidia-cudnn-cu12", specifier = ">=9,<10" },
-    { name = "openwakeword", specifier = ">=0.4.0" },
-    { name = "piper-tts", specifier = ">=1.8.0" },
-    { name = "sounddevice", specifier = ">=0.5.6" },
-]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=9.1.1" }]
-
-[[package]]
 name = "fsspec"
 version = "2026.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -272,6 +241,37 @@ sdist = { url = "https://files.pythonhosted.org/packages/01/e1/2069291243c926a2f
 wheels = [
     { url = "https://files.pythonhosted.org/packages/56/43/4ca9e49d27a1fcf6bece6f6aec0ea46bb9112489b93d4b688fb415457bdb/iniconfig-2.3.1-py3-none-any.whl", hash = "sha256:9121e2c1fdb355232495be3194c8dfe87ccc2d5dee45947b78e68f499790d7a7", size = 7552, upload-time = "2026-10-06T22:48:36.959Z" },
 ]
+
+[[package]]
+name = "jarvis"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "faster-whisper" },
+    { name = "nvidia-cublas-cu12" },
+    { name = "nvidia-cudnn-cu12" },
+    { name = "openwakeword" },
+    { name = "piper-tts" },
+    { name = "sounddevice" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "faster-whisper", specifier = ">=1.2.1" },
+    { name = "nvidia-cublas-cu12", specifier = ">=12.9.2.10" },
+    { name = "nvidia-cudnn-cu12", specifier = ">=9,<10" },
+    { name = "openwakeword", specifier = ">=0.4.0" },
+    { name = "piper-tts", specifier = ">=1.8.0" },
+    { name = "sounddevice", specifier = ">=0.5.6" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.1.1" }]
 
 [[package]]
 name = "joblib"

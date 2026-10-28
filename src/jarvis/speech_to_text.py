@@ -183,9 +183,11 @@ class SpeechToText:
         pre_roll: deque[np.ndarray] = deque(maxlen=pre_roll_blocks)
 
         speech_started = False
+        consecutive_speech_blocks = 0
         silent_blocks = 0
         recorded_frames = 0
         ambient_noise = 0.005
+        required_speech_blocks = 3
 
         if initial_audio is not None and initial_audio.size > 0:
             init_clean = np.asarray(initial_audio, dtype=np.float32).reshape(-1)
@@ -253,10 +255,16 @@ class SpeechToText:
                     )
 
                     if volume >= start_threshold:
+                        consecutive_speech_blocks += 1
+                    else:
+                        consecutive_speech_blocks = 0
+
+                    if consecutive_speech_blocks >= required_speech_blocks:
                         speech_started = True
                         print("JARVIS: Speech detected.")
                         audio_chunks.extend(pre_roll)
                         recorded_frames = sum(len(c) for c in audio_chunks)
+                        
                     elif time.monotonic() >= speech_deadline:
                         print("JARVIS: I didn't hear anything.")
                         return ""
@@ -318,7 +326,7 @@ class SpeechToText:
         block_size = 480  # 30 ms at 16 kHz
         startup_grace_seconds = self.barge_in_grace_seconds
         min_interruption_threshold = self.barge_in_min_threshold
-        required_speech_blocks = 4  # ~120 ms of speech
+        required_speech_blocks = 6  # ~180 ms of speech
         silence_blocks_needed = max(
             1,
             int(self.silence_seconds * self.sample_rate / block_size),
@@ -339,7 +347,7 @@ class SpeechToText:
         recorded_frames = 0
         speaker_baseline = 0.01
 
-        print("JARVIS: You can interrupt me by speaking.")
+        print("JARVIS: Go ahead, I'm listening.")
 
         try:
             with sd.InputStream(
@@ -374,11 +382,21 @@ class SpeechToText:
                             continue
 
                         # Dynamically track speaker energy picked up by mic
-                        speaker_baseline = 0.90 * speaker_baseline + 0.10 * volume
+                        speaker_baseline = (
+                            0.90 * speaker_baseline + 0.10 * volume
+                        )
                         interruption_threshold = max(
                             min_interruption_threshold,
                             speaker_baseline * 1.5 + 0.02,
                         )
+
+                        if int(time.monotonic() * 2) % 10 == 0:
+                            print(
+                                f"\rJARVIS audio: mic={volume:.3f}, "
+                                f"threshold={interruption_threshold:.3f}",
+                                end="",
+                                flush=True,
+                            )
 
                         if volume >= interruption_threshold:
                             consecutive_speech_blocks += 1
