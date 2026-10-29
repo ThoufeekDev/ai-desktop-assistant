@@ -420,11 +420,15 @@ class LinuxControl:
 
         desktop_id = application.desktop_id.removesuffix(".desktop")
 
-        # Snapshot windows before launching so existing windows aren't
-        # mistaken for the new window.
-        previous_ids = {
-            window["id"] for window in self._niri_windows()
-        }
+        # Snapshot windows only when we need to identify a new window
+        # for moving it to a specific output or workspace.
+        previous_ids = (
+            {
+                window["id"] for window in self._niri_windows()
+            }
+            if destination != "cursor"
+            else set()
+        )
 
         expected_app_ids = {
             value.casefold()

@@ -356,8 +356,8 @@ def main() -> None:
                 else:
                     stream, initial_audio = None, None
 
-                print("\nJARVIS: Yes I'm listening?\n", flush=True)
-                speak_response("Yes  I'm listening.?")
+                print("\nJARVIS: Yes, I'm listening.\n", flush=True)
+                speak_response("Yes, I'm listening.")
 
                 try:
                     message = speech.listen_once(

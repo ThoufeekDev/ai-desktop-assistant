@@ -1,0 +1,257 @@
+
+"""Siri-inspired animated energy orb for JARVIS."""
+
+import math
+from enum import Enum
+
+from PySide6.QtCore import QTimer, Qt
+from PySide6.QtGui import (
+    QColor,
+    QLinearGradient,
+    QPainter,
+    QPen,
+    QRadialGradient,
+)
+from PySide6.QtWidgets import QWidget
+
+from jarvis.gui.theme import tokens
+
+
+class OrbState(str, Enum):
+    IDLE = "IDLE"
+    LISTENING = "LISTENING"
+    THINKING = "THINKING"
+    SPEAKING = "SPEAKING"
+
+
+class Orb(QWidget):
+    """Render a flowing, particle-based energy orb."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+
+        self._state = OrbState.IDLE
+        self._phase = 0
+        self._reduce_motion = tokens.REDUCE_MOTION
+
+        self.setMinimumSize(220, 220)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(30)
+        self._timer.timeout.connect(self._advance_animation)
+
+
+    @property
+    def state(self) -> OrbState:
+        return self._state
+
+    def set_state(self, state: OrbState | str) -> None:
+        """Animate only while JARVIS is actively processing audio or a request."""
+        self._state = OrbState(state)
+
+        if self._reduce_motion:
+            self._timer.stop()
+        elif not self._timer.isActive():
+            self._timer.start()
+
+        self.update()
+
+    def set_reduce_motion(self, enabled: bool) -> None:
+        self._reduce_motion = enabled
+
+        if enabled:
+            self._timer.stop()
+            self._phase = 0
+        elif not self._timer.isActive():
+            self._timer.start()
+
+        self.update()
+
+    def _advance_animation(self) -> None:
+        if self._reduce_motion:
+            self._timer.stop()
+            return
+
+        speed = {
+            OrbState.IDLE: 1,
+            OrbState.LISTENING: 3,
+            OrbState.THINKING: 4,
+            OrbState.SPEAKING: 5,
+        }.get(self._state, 1)
+
+        self._phase = (self._phase + speed) % 360
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        del event
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        side = min(self.width(), self.height())
+        cx = self.width() / 2
+        cy = self.height() / 2
+        radius = side * 0.37
+
+        phase = 0 if self._reduce_motion else self._phase
+        t = math.radians(phase)
+
+        state = self._state
+        strength = {
+            OrbState.IDLE: 0.035,
+            OrbState.LISTENING: 0.11,
+            OrbState.THINKING: 0.075,
+            OrbState.SPEAKING: 0.14,
+        }[state]
+
+        pulse = 1.0 + strength * math.sin(t * 2)
+
+        # The orb has its own palette; the global theme remains unchanged.
+        cyan = QColor("#00E5FF")
+        blue = QColor("#287BFF")
+        violet = QColor("#8B5CFF")
+        magenta = QColor("#FF39D4")
+
+        # Soft atmospheric glow behind the mesh.
+        glow = QRadialGradient(cx, cy, radius * 1.65)
+
+        glow_color = QColor("#7B55FF")
+        glow_color.setAlpha(48 if state == OrbState.IDLE else 72)
+
+        glow.setColorAt(0.0, glow_color)
+        glow.setColorAt(0.48, QColor(24, 32, 82, 12))
+        glow.setColorAt(1.0, QColor(0, 0, 0, 0))
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(glow)
+        painter.drawEllipse(
+            int(cx - radius * 1.65),
+            int(cy - radius * 1.65),
+            int(radius * 3.3),
+            int(radius * 3.3),
+        )
+
+        # Build an organic wireframe sphere from curved latitude rings.
+        latitude_count = 19
+        longitude_count = 27
+        mesh_radius = radius * 0.91 * pulse
+
+        for lat_index in range(1, latitude_count):
+            latitude = -math.pi / 2 + math.pi * lat_index / latitude_count
+            points = []
+
+            for point_index in range(longitude_count + 1):
+                longitude = (
+                    2 * math.pi * point_index / longitude_count
+                )
+
+                wave = (
+                    math.sin(longitude * 3 + t * 1.5 + latitude * 4)
+                    * 0.09
+                    + math.sin(longitude * 5 - t * 0.8)
+                    * 0.045
+                )
+
+                if state == OrbState.LISTENING:
+                    wave *= 1.8
+                elif state == OrbState.SPEAKING:
+                    wave *= 2.2
+
+                r = mesh_radius * math.cos(latitude) * (1 + wave)
+                x = cx + r * math.cos(longitude + t * 0.25)
+                y = cy + (
+                    mesh_radius * math.sin(latitude)
+                    + r * math.sin(longitude + t * 0.25) * 0.20
+                )
+
+                points.append((x, y))
+
+            for index in range(len(points) - 1):
+                x1, y1 = points[index]
+                x2, y2 = points[index + 1]
+
+                blend = (lat_index / latitude_count) * 0.72
+                color = QColor(cyan if blend < 0.25 else blue)
+                if blend >= 0.50:
+                    color = QColor(violet)
+                if blend >= 0.70:
+                    color = QColor(magenta)
+
+                color.setAlpha(135)
+                painter.setPen(QPen(color, 0.8))
+                painter.drawLine(int(x1), int(y1), int(x2), int(y2))
+
+        # Flowing vertical meridians.
+        for meridian in range(14):
+            angle = 2 * math.pi * meridian / 14 + t * 0.35
+            path_points = []
+
+            for step in range(49):
+                latitude = -math.pi / 2 + math.pi * step / 48
+
+                wave = math.sin(latitude * 5 + t * 1.6 + angle * 2) * 0.07
+                r = mesh_radius * math.cos(latitude) * (1 + wave)
+
+                x = cx + r * math.cos(angle)
+                y = cy + mesh_radius * math.sin(latitude)
+
+                path_points.append((x, y))
+
+            blend = meridian / 14
+            color = (
+                cyan if blend < 0.25
+                else blue if blend < 0.5
+                else violet if blend < 0.75
+                else magenta
+            )
+
+            painter.setPen(QPen(QColor(color), 0.9))
+
+            for index in range(len(path_points) - 1):
+                x1, y1 = path_points[index]
+                x2, y2 = path_points[index + 1]
+                painter.drawLine(int(x1), int(y1), int(x2), int(y2))
+
+        # Glowing particles around the sphere.
+        particle_count = 100
+        for index in range(particle_count):
+            angle = index * 2.399 + t * 0.7
+            distance = radius * (
+                0.90 + 0.22 * math.sin(index * 1.7 + t * 2)
+            )
+
+            x = cx + math.cos(angle) * distance
+            y = cy + math.sin(angle) * distance * 0.85
+
+            color = (
+                cyan if index % 4 == 0
+                else blue if index % 4 == 1
+                else violet if index % 4 == 2
+                else magenta
+            )
+
+            dot = QColor(color)
+            dot.setAlpha(100 + int(100 * abs(math.sin(t + index))))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(dot)
+
+            dot_size = 1.0 + 1.2 * abs(math.sin(t * 2 + index))
+            painter.drawEllipse(
+                int(x), int(y), int(dot_size), int(dot_size)
+            )
+
+        # A subtle luminous core adds depth without hiding the mesh.
+        core = QRadialGradient(cx, cy, radius * 0.72)
+        core.setColorAt(0.0, QColor(40, 65, 150, 3))
+        core.setColorAt(0.75, QColor(20, 20, 80, 12))
+        core.setColorAt(1.0, QColor(10, 10, 30, 0))
+
+        painter.setBrush(core)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(
+            int(cx - radius * 0.72),
+            int(cy - radius * 0.72),
+            int(radius * 1.44),
+            int(radius * 1.44),
+        )

@@ -1,0 +1,88 @@
+QWidget {
+    background-color: {{BACKGROUND}};
+    color: {{TEXT}};
+    font-family: "{{FONT_UI}}", {{FONT_FALLBACK_UI}};
+    font-size: 14px;
+}
+
+QLabel {
+    background-color: transparent;
+    color: {{TEXT}};
+}
+
+QLabel[muted="true"] {
+    color: {{MUTED}};
+}
+
+QLabel[mono="true"] {
+    font-family: "{{FONT_MONO}}", {{FONT_FALLBACK_MONO}};
+}
+
+QPushButton {
+    background-color: {{SURFACE_RAISED}};
+    color: {{TEXT}};
+    border: 1px solid {{BORDER}};
+    border-radius: 10px;
+    padding: 10px 14px;
+    min-height: 24px;
+}
+
+QPushButton:hover {
+    background-color: {{ACCENT_SOFT}};
+    border-color: {{ACCENT}};
+}
+
+QPushButton:pressed {
+    background-color: {{ACCENT_SOFT}};
+}
+
+QPushButton:disabled {
+    color: {{MUTED}};
+    border-color: {{BORDER}};
+}
+
+QPushButton[primary="true"] {
+    background-color: {{ACCENT}};
+    color: {{ACCENT_TEXT}};
+    border-color: {{ACCENT}};
+}
+
+QPushButton[danger="true"] {
+    background-color: {{DANGER}};
+    color: {{DANGER_TEXT}};
+    border-color: {{DANGER}};
+}
+
+QLineEdit,
+QTextEdit,
+QPlainTextEdit {
+    background-color: {{SURFACE}};
+    color: {{TEXT}};
+    border: 1px solid {{BORDER}};
+    border-radius: 10px;
+    padding: 10px;
+    selection-background-color: {{ACCENT}};
+    selection-color: {{ACCENT_TEXT}};
+}
+
+QLineEdit:focus,
+QTextEdit:focus,
+QPlainTextEdit:focus {
+    border-color: {{ACCENT}};
+}
+
+QScrollArea {
+    background-color: transparent;
+    border: none;
+}
+
+QFrame {
+    border-color: {{BORDER}};
+}
+
+QToolTip {
+    background-color: {{SURFACE_RAISED}};
+    color: {{TEXT}};
+    border: 1px solid {{BORDER}};
+    padding: 6px 8px;
+}
