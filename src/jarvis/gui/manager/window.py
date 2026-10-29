@@ -212,15 +212,15 @@ class ManagerWindow(QWidget):
                     self._stop_voice_listening
                 )
                 page_layout.addWidget(self.voice_page, 1)
-                
+
             elif name == "Memory":
                 self.memory_page = MemoryPage()
                 page_layout.addWidget(self.memory_page, 1)
             elif name == "Storage":
                 self.storage_page = StoragePage()
-                page_layout.addWidget(self.storage_page, 1)                
+                page_layout.addWidget(self.storage_page, 1)
             elif name == "Tools":
-               
+
                 self.tools_page = ToolsPage()
                 page_layout.addWidget(self.tools_page, 1)
             elif name == "Settings":
@@ -360,8 +360,8 @@ class ManagerWindow(QWidget):
             "Starting microphone and speech recognition...",
         )
 
-        thread.start()  
-    
+        thread.start()
+
     def _stop_voice_listening(self) -> None:
         """Request that microphone recording stop."""
         if self._voice_worker is None:
@@ -406,7 +406,7 @@ class ManagerWindow(QWidget):
             f"Voice error: {message}",
         )
         self.voice_page.set_transcript(f"Voice error: {message}")
- 
+
     def _send_message(self) -> None:
         message = self.chat_input.text().strip()
         if not message or self._chat_thread is not None:
@@ -800,7 +800,7 @@ class ManagerWindow(QWidget):
             f"Hostname: {system_info.get('hostname', 'Unknown')}\n"
             f"System uptime: {system_info.get('uptime', 'Unknown')}"
         )
-        
+
 
 
     def _refresh_system_metrics(self) -> None:
@@ -845,7 +845,7 @@ class ManagerWindow(QWidget):
             )
             self.dashboard_disk.setText("Disk: Unavailable")
             self.dashboard_swap.setText("Swap: Unavailable")
-       
+
 
 def main() -> int:
     app = QApplication(sys.argv)
