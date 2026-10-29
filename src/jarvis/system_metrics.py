@@ -1,5 +1,7 @@
 """Read basic system metrics from Linux procfs."""
 
+import json
+import subprocess
 from pathlib import Path
 
 _PROC_STAT = Path("/proc/stat")
@@ -217,3 +219,64 @@ def get_mounted_storage() -> list[dict[str, str | int | float]]:
             )
 
     return filesystems
+
+
+def get_physical_disks() -> list[dict[str, object]]:
+    """Return physical disks and their partition information using lsblk."""
+    result = subprocess.run(
+        [
+            "lsblk",
+            "--json",
+            "--bytes",
+            "--output",
+            "NAME,PATH,TYPE,SIZE,MODEL,TRAN,FSTYPE,MOUNTPOINTS",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+
+    data = json.loads(result.stdout)
+    disks: list[dict[str, object]] = []
+
+    for device in data.get("blockdevices", []):
+        if device.get("type") != "disk":
+            continue
+
+        # Exclude RAM-backed devices such as zram.
+        if device.get("name", "").startswith("zram"):
+            continue
+
+        partitions = []
+        for child in device.get("children", []):
+            partitions.append(
+                {
+                    "name": child.get("name", "Unknown"),
+                    "path": child.get("path", ""),
+                    "size_gib": round(
+                        int(child.get("size") or 0) / (1024 ** 3), 1
+                    ),
+                    "filesystem": child.get("fstype") or "Unknown",
+                    "mountpoints": [
+                        mountpoint
+                        for mountpoint in (child.get("mountpoints") or [])
+                        if mountpoint
+                    ],
+                }
+            )
+
+        disks.append(
+            {
+                "name": device.get("name", "Unknown"),
+                "path": device.get("path", ""),
+                "size_gib": round(
+                    int(device.get("size") or 0) / (1024 ** 3), 1
+                ),
+                "model": (device.get("model") or "").strip() or "Unknown",
+                "transport": device.get("tran") or "Unknown",
+                "partitions": partitions,
+            }
+        )
+
+    return disks
