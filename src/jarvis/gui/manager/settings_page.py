@@ -219,7 +219,12 @@ class SettingsPage(QWidget):
 
             try:
                 load_config(temporary_path)
-            finally:
+            except Exception as exc:
+                raise RuntimeError(
+                    f"{exc}\nTemporary configuration retained at: "
+                    f"{temporary_path}"
+                ) from exc
+            else:
                 temporary_path.unlink(missing_ok=True)
 
             # Atomic replacement avoids leaving a partially written config.
@@ -258,7 +263,7 @@ class SettingsPage(QWidget):
             re.DOTALL,
         )
         if pattern.search(original):
-            result = pattern.sub(replacement.rstrip() + "\n\n", original, count=1)
+            result = pattern.sub(lambda match: replacement.rstrip() + "\n\n", original, count=1)
             return result.rstrip() + "\n"
 
         separator = "\n" if original and not original.endswith("\n") else ""

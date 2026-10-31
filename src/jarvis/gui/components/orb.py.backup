@@ -1,0 +1,151 @@
+"""Reusable animated status orb for JARVIS Qt interfaces."""
+
+from enum import Enum
+
+from PySide6.QtCore import QTimer, Qt
+from PySide6.QtGui import QColor, QPainter, QPen, QRadialGradient
+from PySide6.QtWidgets import QWidget
+
+from jarvis.gui.theme import tokens
+
+
+class OrbState(str, Enum):
+    IDLE = "IDLE"
+    LISTENING = "LISTENING"
+    THINKING = "THINKING"
+    SPEAKING = "SPEAKING"
+
+
+class Orb(QWidget):
+    """Draw a lightweight orb whose animation reflects assistant state."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._state = OrbState.IDLE
+        self._phase = 0
+        self._reduce_motion = tokens.REDUCE_MOTION
+
+        self.setMinimumSize(150, 150)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(40)
+        self._timer.timeout.connect(self._advance_animation)
+
+        if not self._reduce_motion:
+            self._timer.start()
+
+    @property
+    def state(self) -> OrbState:
+        return self._state
+
+    def set_state(self, state: OrbState | str) -> None:
+        """Update the displayed assistant state."""
+        self._state = OrbState(state)
+        self.update()
+
+    def set_reduce_motion(self, enabled: bool) -> None:
+        """Stop animation when reduced motion is enabled."""
+        self._reduce_motion = enabled
+        if enabled:
+            self._timer.stop()
+            self._phase = 0
+        else:
+            self._timer.start()
+        self.update()
+
+    def _advance_animation(self) -> None:
+        if self._reduce_motion:
+            return
+        self._phase = (self._phase + 1) % 360
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        del event
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        side = min(self.width(), self.height())
+        cx = self.width() / 2
+        cy = self.height() / 2
+        radius = side * 0.34
+
+        accent = QColor(tokens.ACCENT)
+        if self._state == OrbState.LISTENING:
+            accent = QColor(tokens.SUCCESS)
+        elif self._state == OrbState.THINKING:
+            accent = QColor(tokens.WARNING)
+        elif self._state == OrbState.SPEAKING:
+            accent = QColor(tokens.ACCENT)
+
+        pulse = 1.0
+        if not self._reduce_motion:
+            import math
+            pulse += 0.035 * math.sin(math.radians(self._phase * 2))
+
+        core_radius = radius * 0.62 * pulse
+
+        gradient = QRadialGradient(cx, cy, core_radius * 1.8)
+        glow = QColor(accent)
+        glow.setAlpha(55)
+        gradient.setColorAt(0.0, glow)
+        gradient.setColorAt(0.55, QColor(tokens.SURFACE_RAISED))
+        gradient.setColorAt(1.0, QColor(tokens.BACKGROUND))
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(gradient)
+        painter.drawEllipse(
+            int(cx - core_radius * 1.8),
+            int(cy - core_radius * 1.8),
+            int(core_radius * 3.6),
+            int(core_radius * 3.6),
+        )
+
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(accent, 1.5))
+        painter.drawEllipse(
+            int(cx - radius),
+            int(cy - radius),
+            int(radius * 2),
+            int(radius * 2),
+        )
+
+        painter.setPen(QPen(QColor(tokens.BORDER), 1.0))
+        painter.drawEllipse(
+            int(cx - radius * 0.82),
+            int(cy - radius * 0.82),
+            int(radius * 1.64),
+            int(radius * 1.64),
+        )
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        core = QRadialGradient(cx - core_radius * 0.25,
+                               cy - core_radius * 0.3,
+                               core_radius * 1.6)
+        core.setColorAt(0.0, QColor("#E6FCFF"))
+        core.setColorAt(0.35, accent)
+        core.setColorAt(1.0, QColor(tokens.SURFACE))
+        painter.setBrush(core)
+        painter.drawEllipse(
+            int(cx - core_radius),
+            int(cy - core_radius),
+            int(core_radius * 2),
+            int(core_radius * 2),
+        )
+
+        if self._state in {OrbState.THINKING, OrbState.SPEAKING}:
+            painter.save()
+            painter.translate(cx, cy)
+            painter.rotate(self._phase if not self._reduce_motion else 0)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(accent, 2.0, Qt.PenStyle.SolidLine,
+                                Qt.PenCapStyle.RoundCap))
+            painter.drawArc(
+                int(-radius * 1.12),
+                int(-radius * 1.12),
+                int(radius * 2.24),
+                int(radius * 2.24),
+                20 * 16,
+                75 * 16,
+            )
+            painter.restore()

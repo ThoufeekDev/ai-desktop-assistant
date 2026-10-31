@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt, QThread, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -19,10 +20,12 @@ from PySide6.QtWidgets import (
 )
 
 
+from jarvis.assistant_engine import AssistantEngine
 from jarvis.gui.chat_worker import ChatWorker
 from jarvis.gui.components.message_view import MessageView
 from jarvis.gui.components.orb import OrbState
 from jarvis.gui.voice_worker import VoiceWorker
+from jarvis.gui.wake_word_worker import WakeWordWorker
 from jarvis.gui.manager.memory_page import MemoryPage
 from jarvis.gui.manager.tools_page import ToolsPage
 from jarvis.gui.manager.settings_page import SettingsPage
@@ -66,11 +69,15 @@ class ManagerWindow(QWidget):
         self.setMinimumSize(960, 640)
 
         self._ollama_client: OllamaClient | None = None
+        self._assistant_engine: AssistantEngine | None = None
         self._chat_thread: QThread | None = None
         self._chat_worker: ChatWorker | None = None
         self._last_error = ""
         self._voice_thread: QThread | None = None
         self._voice_worker: VoiceWorker | None = None
+        self._wake_word_thread: QThread | None = None
+        self._wake_word_worker: WakeWordWorker | None = None
+        self._close_when_idle = False
 
         try:
             from jarvis.config import load_config
@@ -82,6 +89,9 @@ class ManagerWindow(QWidget):
                 timeout=ollama.timeout,
                 system_prompt=ollama.system_prompt,
                 max_history_turns=ollama.max_history_turns,
+            )
+            self._assistant_engine = AssistantEngine(
+                client=self._ollama_client,
             )
             self._last_error = ""
         except Exception as exc:
@@ -121,7 +131,7 @@ class ManagerWindow(QWidget):
 
         sidebar = QFrame()
         sidebar.setObjectName("ManagerSidebar")
-        sidebar.setFixedWidth(220)
+        sidebar.setFixedWidth(240)
         sidebar.setStyleSheet(
             f"QFrame#ManagerSidebar {{"
             f"background-color: {tokens.SURFACE};"
@@ -130,8 +140,8 @@ class ManagerWindow(QWidget):
         )
 
         side_layout = QVBoxLayout(sidebar)
-        side_layout.setContentsMargins(16, 20, 16, 16)
-        side_layout.setSpacing(12)
+        side_layout.setContentsMargins(18, 24, 18, 18)
+        side_layout.setSpacing(8)
 
         brand = QLabel("JARVIS")
         brand.setStyleSheet(
@@ -149,10 +159,64 @@ class ManagerWindow(QWidget):
         side_layout.addSpacing(18)
 
         self.navigation = QListWidget()
+        self.navigation.setObjectName("ManagerNavigation")
         self.navigation.setAccessibleName("Manager page navigation")
+        self.navigation.setSpacing(5)
+        self.navigation.setFrameShape(QFrame.Shape.NoFrame)
+        self.navigation.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.navigation.setStyleSheet(
+            f"""
+            QListWidget#ManagerNavigation {{
+                background-color: transparent;
+                border: none;
+                outline: none;
+                color: {tokens.MUTED};
+                font-size: 13px;
+                padding: 4px 0;
+            }}
+
+            QListWidget#ManagerNavigation::item {{
+                min-height: 40px;
+                padding: 0 12px;
+                border-radius: 8px;
+                border: 1px solid transparent;
+            }}
+
+            QListWidget#ManagerNavigation::item:hover {{
+                background-color: {tokens.SURFACE_RAISED};
+                color: {tokens.TEXT};
+            }}
+
+            QListWidget#ManagerNavigation::item:selected {{
+                background-color: {tokens.SURFACE_RAISED};
+                color: {tokens.ACCENT};
+                border: 1px solid {tokens.BORDER};
+                font-weight: 600;
+            }}
+            """
+        )
+
+        page_icons = {
+            "Dashboard": "◈",
+            "Chat": "◉",
+            "Voice": "♫",
+            "Memory": "◎",
+            "Storage": "▤",
+            "Tools": "⚒",
+            "Automation": "⟳",
+            "Settings": "⚙",
+        }
 
         for name, _description in PAGES:
-            item = QListWidgetItem(name)
+            icon = page_icons.get(name, "•")
+            item = QListWidgetItem(f"{icon}    {name}")
+            item.setTextAlignment(
+                Qt.AlignmentFlag.AlignVCenter
+                | Qt.AlignmentFlag.AlignLeft
+            )
+            self.navigation.addItem(item)
             item.setTextAlignment(
                 Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
             )
@@ -431,7 +495,18 @@ class ManagerWindow(QWidget):
         self.status_label.setText("● THINKING")
 
         thread = QThread(self)
-        worker = ChatWorker(self._ollama_client, message)
+        if self._assistant_engine is None:
+            self.messages.add_message(
+                "assistant",
+                "JARVIS assistant engine is not initialized.",
+            )
+            self.dashboard_orb.set_state(OrbState.IDLE)
+            self.chat_input.setEnabled(True)
+            self.send_button.setEnabled(True)
+            self.clear_button.setEnabled(True)
+            return
+
+        worker = ChatWorker(self._assistant_engine, message)
         worker.moveToThread(thread)
 
         thread.started.connect(worker.run)
@@ -533,6 +608,12 @@ class ManagerWindow(QWidget):
                 system_prompt=ollama.system_prompt,
                 max_history_turns=ollama.max_history_turns,
             )
+            if self._assistant_engine is None:
+                self._assistant_engine = AssistantEngine(
+                    client=self._ollama_client,
+                )
+            else:
+                self._assistant_engine.client = self._ollama_client
             self._last_error = ""
             self.status_label.setText(
                 f"● LOCAL MODEL • {self._ollama_client.model}"
@@ -561,15 +642,48 @@ class ManagerWindow(QWidget):
 
 
 
+
     def _build_dashboard_page(
         self,
         page: QWidget,
         page_layout: QVBoxLayout,
     ) -> None:
-        """Build the JARVIS dashboard overview."""
-        page_layout.setSpacing(14)
+        """Build a dashboard with separate, reusable visual cards."""
+        page_layout.setSpacing(16)
 
-        # Dashboard introduction
+        card_style = (
+            f"background-color: {tokens.SURFACE_RAISED};"
+            f"border: 1px solid {tokens.BORDER};"
+            "border-radius: 14px;"
+        )
+
+        label_style = (
+            f"color: {tokens.ACCENT};"
+            f"font-family: '{tokens.FONT_MONO}';"
+            "font-size: 11px;"
+            "font-weight: 700;"
+            "background-color: transparent;"
+            "border: none;"
+        )
+
+        def make_card(object_name: str) -> tuple[QFrame, QVBoxLayout]:
+            card = QFrame()
+            card.setObjectName(object_name)
+            card.setStyleSheet(
+                f"QFrame#{object_name} {{{card_style}}}"
+            )
+
+            layout = QVBoxLayout(card)
+            layout.setContentsMargins(16, 14, 16, 14)
+            layout.setSpacing(10)
+            return card, layout
+
+        def make_heading(text: str) -> QLabel:
+            label = QLabel(text)
+            label.setStyleSheet(label_style)
+            return label
+
+        # Dashboard heading
         heading = QLabel("NEURAL INTERFACE")
         heading.setStyleSheet(
             f"color: {tokens.TEXT}; font-size: 22px; font-weight: 700;"
@@ -586,53 +700,76 @@ class ManagerWindow(QWidget):
         page_layout.addWidget(heading)
         page_layout.addWidget(description)
 
-        # Main dashboard card styling
-        card_style = (
-            f"background-color: {tokens.SURFACE_RAISED};"
-            f"border: 1px solid {tokens.BORDER};"
-            "border-radius: 14px;"
+        # Four independent system metric cards
+        metrics_grid = QGridLayout()
+        metrics_grid.setSpacing(12)
+
+        metric_definitions = (
+            ("CPU USAGE", "dashboard_cpu", "Measuring…"),
+            ("MEMORY", "dashboard_ram", "Reading…"),
+            ("DISK STORAGE", "dashboard_disk", "Reading…"),
+            ("SWAP MEMORY", "dashboard_swap", "Reading…"),
         )
 
-        label_style = (
-            f"color: {tokens.ACCENT};"
-            f"font-family: '{tokens.FONT_MONO}';"
-            "font-size: 11px;"
-            "font-weight: 700;"
-            "background-color: transparent;"
-            "border: none;"
-        )
+        for index, (title, attribute, initial_value) in enumerate(
+            metric_definitions
+        ):
+            card, layout = make_card(f"DashboardMetric{index}")
 
-        # Main two-column layout
+            layout.addWidget(make_heading(title))
+
+            value_label = QLabel(initial_value)
+            value_label.setWordWrap(True)
+            value_label.setMinimumHeight(36)
+            value_label.setStyleSheet(
+                f"color: {tokens.TEXT};"
+                "font-size: 17px;"
+                "font-weight: 600;"
+                "background-color: transparent;"
+                "border: none;"
+            )
+
+            layout.addWidget(value_label)
+            setattr(self, attribute, value_label)
+
+            metrics_grid.addWidget(card, index // 2, index % 2)
+
+        page_layout.addLayout(metrics_grid)
+
+        # Main row: neural interface and independent status/actions cards
         main_row = QHBoxLayout()
         main_row.setSpacing(14)
 
-        # Neural Interface panel
-        neural_card = QFrame()
-        neural_card.setObjectName("DashboardNeuralCard")
-        neural_card.setStyleSheet(
-            f"QFrame#DashboardNeuralCard {{{card_style}}}"
+        # Neural interface card
+        neural_card, neural_layout = make_card(
+            "DashboardNeuralCard"
         )
-
-        neural_layout = QVBoxLayout(neural_card)
-        neural_layout.setContentsMargins(20, 18, 20, 18)
-        neural_layout.setSpacing(10)
+        neural_layout.setContentsMargins(18, 18, 18, 18)
 
         neural_title = QLabel("J.A.R.V.I.S.")
         neural_title.setStyleSheet(
-            f"color: {tokens.TEXT}; font-size: 18px; font-weight: 700;"
+            f"color: {tokens.TEXT}; font-size: 20px; font-weight: 700;"
+            "background-color: transparent; border: none;"
         )
 
-        neural_subtitle = QLabel("PERSONAL AI SYSTEM")
-        neural_subtitle.setStyleSheet(label_style)
+        neural_layout.addWidget(neural_title)
+        neural_layout.addWidget(make_heading("PERSONAL AI SYSTEM"))
 
         from jarvis.gui.components.orb import Orb
 
         self.dashboard_orb = Orb()
-        self.dashboard_orb.setMinimumSize(300, 300)
+        self.dashboard_orb.setMinimumSize(180, 180)
+        self.dashboard_orb.setMaximumSize(280, 280)
         self.dashboard_orb.set_state(OrbState.IDLE)
         self.dashboard_orb.setToolTip(
             "JARVIS visual interface. Voice-state integration "
             "will be connected separately."
+        )
+
+        neural_layout.addWidget(
+            self.dashboard_orb,
+            1,
+            Qt.AlignmentFlag.AlignCenter,
         )
 
         welcome = QLabel("How can I help you today?")
@@ -640,7 +777,7 @@ class ManagerWindow(QWidget):
         welcome.setWordWrap(True)
         welcome.setStyleSheet(
             f"color: {tokens.TEXT}; font-size: 15px; font-weight: 600;"
-            "background-color: transparent;"
+            "background-color: transparent; border: none;"
         )
 
         neural_hint = QLabel(
@@ -650,33 +787,20 @@ class ManagerWindow(QWidget):
         neural_hint.setWordWrap(True)
         neural_hint.setStyleSheet(
             f"color: {tokens.MUTED}; font-size: 11px;"
-            "background-color: transparent;"
+            "background-color: transparent; border: none;"
         )
 
-        neural_layout.addWidget(neural_title)
-        neural_layout.addWidget(neural_subtitle)
-        neural_layout.addWidget(
-            self.dashboard_orb,
-            1,
-            Qt.AlignmentFlag.AlignCenter,
-        )
         neural_layout.addWidget(welcome)
         neural_layout.addWidget(neural_hint)
 
-        # System Status panel
-        status_card = QFrame()
-        status_card.setObjectName("DashboardStatusCard")
-        status_card.setStyleSheet(
-            f"QFrame#DashboardStatusCard {{{card_style}}}"
+        # Right column contains separate status and action cards
+        right_column = QVBoxLayout()
+        right_column.setSpacing(14)
+
+        status_card, status_layout = make_card(
+            "DashboardStatusCard"
         )
-
-        status_layout = QVBoxLayout(status_card)
-        status_layout.setContentsMargins(18, 18, 18, 18)
-        status_layout.setSpacing(12)
-
-        status_heading = QLabel("SYSTEM STATUS")
-        status_heading.setStyleSheet(label_style)
-        status_layout.addWidget(status_heading)
+        status_layout.addWidget(make_heading("SYSTEM STATUS"))
 
         self.dashboard_status = QLabel()
         self.dashboard_status.setWordWrap(True)
@@ -684,10 +808,8 @@ class ManagerWindow(QWidget):
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         self.dashboard_status.setStyleSheet(
-            f"color: {tokens.TEXT};"
-            "font-size: 12px;"
-            "background-color: transparent;"
-            "border: none;"
+            f"color: {tokens.TEXT}; font-size: 12px;"
+            "background-color: transparent; border: none;"
         )
 
         if self._ollama_client is not None:
@@ -705,29 +827,12 @@ class ManagerWindow(QWidget):
             )
 
         status_layout.addWidget(self.dashboard_status)
+        status_layout.addStretch()
 
-        # Live system metrics
-        self.dashboard_cpu = QLabel("CPU: Reading…")
-        self.dashboard_ram = QLabel("RAM: Reading…")
-        self.dashboard_disk = QLabel("Disk: Reading…")
-        self.dashboard_swap = QLabel("Swap: Reading…")
-
-        for metric_label in (self.dashboard_cpu, self.dashboard_ram,self.dashboard_disk,self.dashboard_swap):
-            metric_label.setStyleSheet(
-                f"color: {tokens.TEXT};"
-                "font-size: 12px;"
-                "background-color: transparent;"
-                "border: none;"
-            )
-            status_layout.addWidget(metric_label)
-
-        # One set of Quick Actions; reuse existing navigation
-        actions_heading = QLabel("QUICK ACTIONS")
-        actions_heading.setStyleSheet(
-            f"color: {tokens.TEXT}; font-size: 14px; font-weight: 700;"
-            "background-color: transparent;"
+        actions_card, actions_layout = make_card(
+            "DashboardActionsCard"
         )
-        status_layout.addWidget(actions_heading)
+        actions_layout.addWidget(make_heading("QUICK ACTIONS"))
 
         for target, caption in (
             ("Chat", "Open Chat"),
@@ -751,44 +856,35 @@ class ManagerWindow(QWidget):
                 )
             )
 
-            status_layout.addWidget(button)
+            actions_layout.addWidget(button)
 
-        status_layout.addStretch(1)
+        right_column.addWidget(status_card, 1)
+        right_column.addWidget(actions_card)
 
         main_row.addWidget(neural_card, 3)
-        main_row.addWidget(status_card, 2)
+        main_row.addLayout(right_column, 2)
 
         page_layout.addLayout(main_row, 1)
 
-
-        # System Information card
-        info_card = QFrame()
-        info_card.setObjectName("DashboardInfoCard")
-        info_card.setStyleSheet(
-            f"QFrame#DashboardInfoCard {{{card_style}}}"
+        # Independent system information card
+        info_card, info_layout = make_card(
+            "DashboardInfoCard"
         )
+        info_layout.addWidget(make_heading("SYSTEM INFORMATION"))
 
-        info_layout = QVBoxLayout(info_card)
-        info_layout.setContentsMargins(18, 14, 18, 14)
-        info_layout.setSpacing(8)
-
-        info_heading = QLabel("SYSTEM INFORMATION")
-        info_heading.setStyleSheet(label_style)
-        info_layout.addWidget(info_heading)
-
-        self.dashboard_system_info = QLabel("Loading system information…")
+        self.dashboard_system_info = QLabel(
+            "Loading system information…"
+        )
         self.dashboard_system_info.setWordWrap(True)
         self.dashboard_system_info.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         self.dashboard_system_info.setStyleSheet(
-            f"color: {tokens.TEXT};"
-            "font-size: 12px;"
-            "background-color: transparent;"
-            "border: none;"
+            f"color: {tokens.TEXT}; font-size: 12px;"
+            "background-color: transparent; border: none;"
         )
-        info_layout.addWidget(self.dashboard_system_info)
 
+        info_layout.addWidget(self.dashboard_system_info)
         page_layout.addWidget(info_card)
 
         system_info = get_system_info()
@@ -803,6 +899,8 @@ class ManagerWindow(QWidget):
 
 
 
+
+
     def _refresh_system_metrics(self) -> None:
         """Refresh the dashboard's CPU, memory, disk, and swap readings."""
         try:
@@ -811,40 +909,36 @@ class ManagerWindow(QWidget):
             )
 
             if cpu_usage is None:
-                self.dashboard_cpu.setText("CPU: Measuring…")
+                self.dashboard_cpu.setText("Measuring…")
             else:
-                self.dashboard_cpu.setText(
-                    f"CPU Usage: {cpu_usage:.1f}%"
-                )
+                self.dashboard_cpu.setText(f"{cpu_usage:.1f}%")
 
             used, total, percentage = get_memory_usage()
             self.dashboard_ram.setText(
-                f"RAM Usage: {percentage:.1f}% "
-                f"({used:,} / {total:,} MiB)"
+                f"{percentage:.1f}%\n"
+                f"{used:,} / {total:,} MiB"
             )
 
             disk_used, disk_total, disk_free, disk_percent = (
                 get_disk_usage()
             )
             self.dashboard_disk.setText(
-                f"Disk Usage: {disk_percent:.1f}% "
-                f"({disk_used} / {disk_total} GiB, "
-                f"{disk_free} GiB free)"
+                f"{disk_percent:.1f}%\n"
+                f"{disk_free} GiB available"
             )
 
             swap_used, swap_total, swap_percent = get_swap_usage()
             self.dashboard_swap.setText(
-                f"Swap Usage: {swap_percent:.1f}% "
-                f"({swap_used:,} / {swap_total:,} MiB)"
+                f"{swap_percent:.1f}%\n"
+                f"{swap_used:,} / {swap_total:,} MiB"
             )
 
         except (OSError, ValueError, RuntimeError) as exc:
-            self.dashboard_cpu.setText("CPU: Unavailable")
-            self.dashboard_ram.setText(
-                f"RAM: Unavailable ({exc})"
-            )
-            self.dashboard_disk.setText("Disk: Unavailable")
-            self.dashboard_swap.setText("Swap: Unavailable")
+            self.dashboard_cpu.setText("Unavailable")
+            self.dashboard_ram.setText("Unavailable")
+            self.dashboard_disk.setText("Unavailable")
+            self.dashboard_swap.setText("Unavailable")
+
 
 
 def main() -> int:

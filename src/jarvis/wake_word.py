@@ -4,6 +4,7 @@
 import math
 import time
 import warnings
+import threading
 from collections import deque
 from pathlib import Path
 
@@ -103,6 +104,7 @@ class WakeWordDetector:
         self,
         stream: sd.InputStream | None = None,
         return_stream: bool = True,
+        stop_event: threading.Event | None = None,
     ) -> tuple[sd.InputStream, np.ndarray] | None:
         """Wait for 'Hey Jarvis' and optionally preserve the active stream."""
 
@@ -143,13 +145,15 @@ class WakeWordDetector:
         rolling_buffer: deque[np.ndarray] = deque(maxlen=2)
 
         try:
-            while True:
+            while stop_event is None or not stop_event.is_set():
                 try:
                     audio, overflowed = active_stream.read(self.chunk_size)
                 except (sd.PortAudioError, OSError) as exc:
                     raise RuntimeError(
                         f"Microphone read error during wake-word detection: {exc}"
                     ) from exc
+                if stop_event is not None and stop_event.is_set():
+                    return None                    
 
                 if overflowed:
                     print("\nJARVIS: Microphone buffer overflow.")

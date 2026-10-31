@@ -1,10 +1,18 @@
 
 """Safe, allowlisted desktop controls for JARVIS."""
+
 import json
 import time
 import shutil
 import subprocess
+
 from jarvis.app_discovery import ApplicationDiscovery
+
+
+# Track the most recently opened window across LinuxControl instances.
+_LAST_OPENED_WINDOW: dict[str, str] | None = None
+_PENDING_CLOSE_APP: str | None = None
+
 
 class LinuxControl:
     """Perform explicitly supported Linux desktop actions."""
@@ -363,6 +371,23 @@ class LinuxControl:
 
         return None
 
+
+    def get_last_opened_window(self) -> dict[str, str] | None:
+        """Return the most recently tracked window, if available."""
+        if _LAST_OPENED_WINDOW is None:
+            return None
+
+        return _LAST_OPENED_WINDOW.copy()
+
+    def set_pending_close_app(self, app_name: str | None) -> None:
+        """Remember which application the user was asked to disambiguate."""
+        global _PENDING_CLOSE_APP
+        _PENDING_CLOSE_APP = app_name
+
+    def get_pending_close_app(self) -> str | None:
+        """Return the application awaiting window selection."""
+        return _PENDING_CLOSE_APP
+
     def open_app(
         self,
         app_name: str,
@@ -370,7 +395,10 @@ class LinuxControl:
         workspace: int | None = None,
         output: str | None = None,
     ) -> str:
-        """Open an application and optionally move its new window."""
+        """Open an application and track its newly created window."""
+
+
+        global _LAST_OPENED_WINDOW
 
         query = app_name.strip()
 
@@ -403,6 +431,7 @@ class LinuxControl:
             )
 
         valid_destinations = {"cursor", "eDP-1", "DP-5", "workspace"}
+
         if destination not in valid_destinations:
             return f"I don't support the destination '{destination}'."
 
@@ -412,6 +441,7 @@ class LinuxControl:
             return "Please specify a valid workspace number."
 
         launcher = shutil.which("gtk-launch")
+
         if launcher is None:
             return (
                 "I couldn't find gtk-launch, which is needed "
@@ -420,15 +450,26 @@ class LinuxControl:
 
         desktop_id = application.desktop_id.removesuffix(".desktop")
 
-        # Snapshot windows only when we need to identify a new window
-        # for moving it to a specific output or workspace.
-        previous_ids = (
-            {
-                window["id"] for window in self._niri_windows()
+        # Capture existing windows before launching the application.
+        existing_windows = self._niri_windows()
+        previous_ids = {
+            window["id"]
+            for window in existing_windows
+        }
+
+        existing_matching_windows = [
+            window
+            for window in existing_windows
+            if str(window.get("app_id", "")).casefold()
+            in {
+                value.casefold()
+                for value in (
+                    application.startup_wm_class,
+                    application.desktop_id.removesuffix(".desktop"),
+                )
+                if value
             }
-            if destination != "cursor"
-            else set()
-        )
+        ]
 
         expected_app_ids = {
             value.casefold()
@@ -450,15 +491,36 @@ class LinuxControl:
         except OSError as exc:
             return f"I couldn't open {application.name}: {exc}"
 
-        # Cursor targeting is not implemented yet. Preserve normal
-        # launch behavior instead of guessing which output has the cursor.
-        if destination == "cursor":
-            return f"Opened {application.name}."
-
+        # Identify the new window for tracking and optional placement.
         window = self._wait_for_new_window(
             previous_ids,
             expected_app_ids,
+            timeout=3.0 if destination == "cursor" else 8.0,
         )
+
+
+        if window is not None:
+            _LAST_OPENED_WINDOW = {
+                "id": str(window["id"]),
+                "app_id": str(window.get("app_id", "")),
+                "title": str(window.get("title", "")),
+            }
+        elif (
+            destination == "cursor"
+            and len(existing_matching_windows) == 1
+        ):
+            # The application may have reused an existing window.
+            reused_window = existing_matching_windows[0]
+            _LAST_OPENED_WINDOW = {
+                "id": str(reused_window["id"]),
+                "app_id": str(reused_window.get("app_id", "")),
+                "title": str(reused_window.get("title", "")),
+            }
+
+
+        # Normal launches should succeed even if window identification fails.
+        if destination == "cursor":
+            return f"Opened {application.name}."
 
         if window is None:
             return (
@@ -486,6 +548,7 @@ class LinuxControl:
             "your laptop" if destination == "eDP-1"
             else "your external monitor"
         )
+
         return f"Opened {application.name} on {monitor_description}."
 
 

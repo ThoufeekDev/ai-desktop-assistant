@@ -2,6 +2,7 @@
 """Client for the local Ollama chat API with bounded context management."""
 
 import json
+from datetime import datetime
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -81,12 +82,43 @@ class OllamaClient:
 
         return total
 
+
+
     def _build_system_content(
         self,
         memories: list[str] | None = None,
+        workspace: str | None = None,
+        window: str | None = None,
     ) -> str:
         """Build the system prompt consistently for every chat request."""
         content = self.system_prompt
+
+        now = datetime.now().astimezone()
+        content += (
+            "\n\nCurrent local date and time:\n"
+            f"- Date and time: {now.strftime('%A, %d %B %Y, %I:%M %p')}\n"
+            f"- Timezone: {now.tzinfo}\n"
+            "Use this context when answering time-sensitive questions. "
+            "Do not assume this timestamp is the user's location."
+        )
+
+        workspace_context = workspace.strip() if workspace else ""
+        content += (
+            "\n\nActive desktop workspace:\n"
+            f"- {workspace_context or 'Unavailable'}\n"
+            "Treat this as the current desktop context only. "
+            "Do not claim to control or change workspaces unless a "
+            "supported action actually succeeds."
+        )
+
+        # ADD THE NEW CODE HERE
+        window_context = window.strip() if window else ""
+        content += (
+            "\n\nCurrently focused window:\n"
+            f"- {window_context or 'Unavailable'}\n"
+            "Treat this as the currently focused window only. "
+            "Do not assume you can inspect its contents."
+        )
 
         if self.conversation_summary:
             content += (
@@ -117,6 +149,7 @@ class OllamaClient:
             )
 
         return content
+
 
     def _post_chat(
         self,
@@ -270,6 +303,8 @@ class OllamaClient:
         self,
         message: str,
         memories: list[str] | None = None,
+        workspace: str | None = None,
+        window: str | None = None,
     ) -> str:
         """Answer a message while managing recent history and context size."""
         if not isinstance(message, str) or not message.strip():
@@ -280,7 +315,7 @@ class OllamaClient:
         bounded_history = self.messages[-history_limit:]
         prompt_budget = self.context_window - self.response_reserve_tokens
 
-        system_content = self._build_system_content(memories)
+        system_content = self._build_system_content(memories=memories,workspace=workspace,window=window)
 
         def build_request() -> list[dict[str, str]]:
             return [
@@ -302,7 +337,7 @@ class OllamaClient:
 
             # Rebuild from one source so memories and summary instructions
             # stay consistent after every trimming operation.
-            system_content = self._build_system_content(memories)
+            system_content = self._build_system_content(memories=memories,workspace=workspace,window=window)
             request_messages = build_request()
 
         if self._estimate_tokens(request_messages) > prompt_budget:

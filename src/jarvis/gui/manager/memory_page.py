@@ -8,8 +8,9 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
+    QHeaderView,
+    QTableWidget,
+    QTableWidgetItem,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
@@ -18,7 +19,7 @@ from PySide6.QtWidgets import (
 
 from jarvis.memory import MemoryStore
 from jarvis.gui.theme import tokens
-
+from PySide6.QtCore import Qt
 
 class MemoryPage(QWidget):
     """View, search, save, edit, and delete saved memories."""
@@ -56,13 +57,67 @@ class MemoryPage(QWidget):
         search_row.addWidget(show_all_button)
         root.addLayout(search_row)
 
-        self.memory_list = QListWidget()
-        self.memory_list.setAccessibleName("Saved memories")
-        self.memory_list.setSelectionMode(
+        self.memory_table = QTableWidget(0, 3)
+        self.memory_table.setObjectName("MemoryTable")
+        self.memory_table.setAccessibleName("Saved memories")
+        self.memory_table.setHorizontalHeaderLabels(
+            ["ID", "Memory", "Saved"]
+        )
+        self.memory_table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.memory_table.setSelectionMode(
             QAbstractItemView.SelectionMode.SingleSelection
         )
-        self.memory_list.itemDoubleClicked.connect(self._edit_selected)
-        root.addWidget(self.memory_list, 1)
+        self.memory_table.setEditTriggers(
+            QAbstractItemView.EditTrigger.NoEditTriggers
+        )
+        self.memory_table.setAlternatingRowColors(True)
+        self.memory_table.setShowGrid(False)
+        self.memory_table.verticalHeader().setVisible(False)
+        self.memory_table.verticalHeader().setDefaultSectionSize(54)
+
+        header = self.memory_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+
+        self.memory_table.setStyleSheet(
+            f"""
+            QTableWidget#MemoryTable {{
+                background-color: {tokens.SURFACE};
+                alternate-background-color: {tokens.SURFACE_RAISED};
+                color: {tokens.TEXT};
+                border: 1px solid {tokens.BORDER};
+                border-radius: 10px;
+                padding: 6px;
+                selection-background-color: {tokens.SURFACE_RAISED};
+                selection-color: {tokens.ACCENT};
+            }}
+
+            QTableWidget#MemoryTable::item {{
+                padding: 10px 8px;
+                border: none;
+                border-bottom: 1px solid {tokens.BORDER};
+            }}
+
+            QTableWidget#MemoryTable::item:hover {{
+                background-color: {tokens.SURFACE_RAISED};
+            }}
+
+            QHeaderView::section {{
+                background-color: {tokens.SURFACE_RAISED};
+                color: {tokens.MUTED};
+                padding: 12px 8px;
+                border: none;
+                border-bottom: 1px solid {tokens.BORDER};
+                font-weight: 600;
+            }}
+            """
+        )
+
+        self.memory_table.itemDoubleClicked.connect(self._edit_selected)
+        root.addWidget(self.memory_table, 1)
 
         self.status = QLabel("")
         self.status.setWordWrap(True)
@@ -99,7 +154,24 @@ class MemoryPage(QWidget):
             else:
                 self._memories = self.store.list_all()
 
-            self.memory_list.clear()
+            self.memory_table.setRowCount(len(self._memories))
+
+            for row, memory in enumerate(self._memories):
+                id_item = QTableWidgetItem(f"#{memory.id}")
+                id_item.setData(256, memory.id)
+                id_item.setTextAlignment(
+                    Qt.AlignmentFlag.AlignCenter
+                )
+
+                content_item = QTableWidgetItem(memory.content)
+                content_item.setToolTip(memory.content)
+
+                saved_item = QTableWidgetItem(str(memory.created_at))
+                saved_item.setToolTip(str(memory.created_at))
+
+                self.memory_table.setItem(row, 0, id_item)
+                self.memory_table.setItem(row, 1, content_item)
+                self.memory_table.setItem(row, 2, saved_item)
 
             for memory in self._memories:
                 item = QListWidgetItem(
@@ -121,8 +193,9 @@ class MemoryPage(QWidget):
         self.refresh()
 
     def _selected_memory(self):
-        item = self.memory_list.currentItem()
-        if item is None:
+        row = self.memory_table.currentRow()
+
+        if row < 0:
             QMessageBox.information(
                 self,
                 "Select a memory",
@@ -130,9 +203,18 @@ class MemoryPage(QWidget):
             )
             return None
 
+        item = self.memory_table.item(row, 0)
+        if item is None:
+            return None
+
         memory_id = item.data(256)
+
         return next(
-            (memory for memory in self._memories if memory.id == memory_id),
+            (
+                memory
+                for memory in self._memories
+                if memory.id == memory_id
+            ),
             None,
         )
 

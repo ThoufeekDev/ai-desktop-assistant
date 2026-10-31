@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QVBoxLayout,
     QWidget,
+    QGridLayout,
 )
 
 from jarvis.gui.theme import tokens
@@ -70,7 +71,10 @@ class StoragePage(QWidget):
         )
         self.content_layout.addWidget(physical_title)
 
-        self.disk_layout = QVBoxLayout()
+        self.disk_layout = QGridLayout()
+        self.disk_layout.setSpacing(14)
+        self.disk_layout.setColumnStretch(0, 1)
+        self.disk_layout.setColumnStretch(1, 1)
         self.disk_layout.setSpacing(12)
         self.content_layout.addLayout(self.disk_layout)
 
@@ -136,6 +140,15 @@ class StoragePage(QWidget):
             for disk in disks:
                 card = QFrame()
                 card.setObjectName("ManagerCard")
+                card.setStyleSheet(
+                    f"""
+                    QFrame#ManagerCard {{
+                        background-color: {tokens.SURFACE};
+                        border: 1px solid {tokens.BORDER};
+                        border-radius: 12px;
+                    }}
+                    """
+                )
 
                 layout = QVBoxLayout(card)
                 layout.setContentsMargins(20, 16, 20, 16)
@@ -165,19 +178,48 @@ class StoragePage(QWidget):
                         or "Not mounted"
                     )
 
-                    partition_label = QLabel(
-                        f"{partition['name']} — "
-                        f"{partition['size_gib']:.1f} GiB\n"
+                    partition_card = QFrame()
+                    partition_card.setObjectName("PartitionCard")
+                    partition_card.setStyleSheet(
+                        f"""
+                        QFrame#PartitionCard {{
+                            background-color: {tokens.SURFACE_RAISED};
+                            border: 1px solid {tokens.BORDER};
+                            border-radius: 8px;
+                        }}
+                        """
+                    )
+
+                    partition_layout = QVBoxLayout(partition_card)
+                    partition_layout.setContentsMargins(12, 10, 12, 10)
+                    partition_layout.setSpacing(4)
+
+                    partition_heading = QLabel(
+                        f"{partition['name']}  ·  "
+                        f"{partition['size_gib']:.1f} GiB"
+                    )
+                    partition_heading.setStyleSheet(
+                        f"color: {tokens.TEXT}; font-weight: 600; "
+                        "background: transparent; border: none;"
+                    )
+
+                    partition_details = QLabel(
                         f"Filesystem: {partition['filesystem']}\n"
                         f"Mount: {mounts}"
                     )
-                    partition_label.setWordWrap(True)
-                    partition_label.setStyleSheet(
-                        f"color: {tokens.MUTED};"
+                    partition_details.setWordWrap(True)
+                    partition_details.setStyleSheet(
+                        f"color: {tokens.MUTED}; "
+                        "background: transparent; border: none;"
                     )
-                    layout.addWidget(partition_label)
 
-                self.disk_layout.addWidget(card)
+                    partition_layout.addWidget(partition_heading)
+                    partition_layout.addWidget(partition_details)
+                    layout.addWidget(partition_card)
+
+                index = disks.index(disk)
+                row, column = divmod(index, 2)
+                self.disk_layout.addWidget(card, row, column)
 
         # Mounted filesystem capacity.
         try:
@@ -201,6 +243,15 @@ class StoragePage(QWidget):
         for filesystem in filesystems:
             card = QFrame()
             card.setObjectName("ManagerCard")
+            card.setStyleSheet(
+                f"""
+                QFrame#ManagerCard {{
+                    background-color: {tokens.SURFACE};
+                    border: 1px solid {tokens.BORDER};
+                    border-radius: 12px;
+                }}
+                """
+            )
 
             layout = QVBoxLayout(card)
             layout.setContentsMargins(20, 16, 20, 16)

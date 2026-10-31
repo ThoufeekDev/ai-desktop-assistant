@@ -151,181 +151,181 @@ class SpeechToText:
         return final_transcript
 
 
-def listen_once(
-    self,
-    stream: sd.InputStream | None = None,
-    initial_audio: np.ndarray | None = None,
-    stop_event: threading.Event | None = None,
-) -> str:
-    """Record one utterance, stopping after silence or cancellation.
+    def listen_once(
+        self,
+        stream: sd.InputStream | None = None,
+        initial_audio: np.ndarray | None = None,
+        stop_event: threading.Event | None = None,
+    ) -> str:
+        """Record one utterance, stopping after silence or cancellation.
 
-    Supports an existing microphone stream and initial audio buffer
-    for smooth handoff from the wake-word detector.
-    """
-    if self.noise_suppressor is None:
-        raise RuntimeError(
-            "The noise suppressor is closed. "
-            "Create a new SpeechToText instance before listening."
-        )
-
-    block_size = 1280  # 80 ms at 16 kHz
-    silence_blocks_needed = max(
-        1,
-        int(self.silence_seconds * self.sample_rate / block_size),
-    )
-    pre_roll_blocks = max(
-        1,
-        int(self.pre_roll_seconds * self.sample_rate / block_size),
-    )
-    max_frames = int(self.max_recording_seconds * self.sample_rate)
-
-    speech_deadline = time.monotonic() + self.speech_timeout
-    audio_chunks: list[np.ndarray] = []
-    pre_roll: deque[np.ndarray] = deque(maxlen=pre_roll_blocks)
-
-    speech_started = False
-    consecutive_speech_blocks = 0
-    silent_blocks = 0
-    recorded_frames = 0
-    ambient_noise = 0.005
-    required_speech_blocks = 3
-
-    if initial_audio is not None and initial_audio.size > 0:
-        init_clean = np.asarray(initial_audio, dtype=np.float32).reshape(-1)
-        audio_chunks.append(init_clean)
-        recorded_frames += len(init_clean)
-        init_vol = float(np.sqrt(np.mean(init_clean * init_clean)))
-        if init_vol >= self.volume_threshold:
-            speech_started = True
-
-    owned_stream: sd.InputStream | None = None
-
-    if stream is None:
-        try:
-            active_stream = sd.InputStream(
-                samplerate=self.sample_rate,
-                channels=1,
-                dtype="int16",
-                blocksize=block_size,
-            )
-            active_stream.start()
-            owned_stream = active_stream
-        except (sd.PortAudioError, OSError) as exc:
+        Supports an existing microphone stream and initial audio buffer
+        for smooth handoff from the wake-word detector.
+        """
+        if self.noise_suppressor is None:
             raise RuntimeError(
-                f"Could not record microphone audio: {exc}"
-            ) from exc
-    else:
-        active_stream = stream
-        if not active_stream.active:
+                "The noise suppressor is closed. "
+                "Create a new SpeechToText instance before listening."
+            )
+
+        block_size = 1280  # 80 ms at 16 kHz
+        silence_blocks_needed = max(
+            1,
+            int(self.silence_seconds * self.sample_rate / block_size),
+        )
+        pre_roll_blocks = max(
+            1,
+            int(self.pre_roll_seconds * self.sample_rate / block_size),
+        )
+        max_frames = int(self.max_recording_seconds * self.sample_rate)
+
+        speech_deadline = time.monotonic() + self.speech_timeout
+        audio_chunks: list[np.ndarray] = []
+        pre_roll: deque[np.ndarray] = deque(maxlen=pre_roll_blocks)
+
+        speech_started = False
+        consecutive_speech_blocks = 0
+        silent_blocks = 0
+        recorded_frames = 0
+        ambient_noise = 0.005
+        required_speech_blocks = 3
+
+        if initial_audio is not None and initial_audio.size > 0:
+            init_clean = np.asarray(initial_audio, dtype=np.float32).reshape(-1)
+            audio_chunks.append(init_clean)
+            recorded_frames += len(init_clean)
+            init_vol = float(np.sqrt(np.mean(init_clean * init_clean)))
+            if init_vol >= self.volume_threshold:
+                speech_started = True
+
+        owned_stream: sd.InputStream | None = None
+
+        if stream is None:
             try:
+                active_stream = sd.InputStream(
+                    samplerate=self.sample_rate,
+                    channels=1,
+                    dtype="int16",
+                    blocksize=block_size,
+                )
                 active_stream.start()
-            except (sd.PortAudioError, OSError) as exc:
-                raise RuntimeError(
-                    f"Could not start microphone stream: {exc}"
-                ) from exc
-
-    print("JARVIS: Listening... Speak now.")
-
-    try:
-        while stop_event is None or not stop_event.is_set():
-            try:
-                block, overflowed = active_stream.read(block_size)
+                owned_stream = active_stream
             except (sd.PortAudioError, OSError) as exc:
                 raise RuntimeError(
                     f"Could not record microphone audio: {exc}"
                 ) from exc
+        else:
+            active_stream = stream
+            if not active_stream.active:
+                try:
+                    active_stream.start()
+                except (sd.PortAudioError, OSError) as exc:
+                    raise RuntimeError(
+                        f"Could not start microphone stream: {exc}"
+                    ) from exc
 
-            # Check again after reading the audio block.
-            if stop_event is not None and stop_event.is_set():
-                return ""
+        print("JARVIS: Listening... Speak now.")
 
-            if overflowed:
-                print("JARVIS: Audio buffer overflow; continuing.")
+        try:
+            while stop_event is None or not stop_event.is_set():
+                try:
+                    block, overflowed = active_stream.read(block_size)
+                except (sd.PortAudioError, OSError) as exc:
+                    raise RuntimeError(
+                        f"Could not record microphone audio: {exc}"
+                    ) from exc
 
-            raw_block = np.asarray(block).reshape(-1)
-            if raw_block.dtype == np.int16:
-                raw_float = raw_block.astype(np.float32) / 32768.0
-            else:
-                raw_float = raw_block.astype(np.float32, copy=True)
-
-            volume = float(np.sqrt(np.mean(raw_float * raw_float)))
-
-            if not speech_started:
-                pre_roll.append(raw_float)
-                ambient_noise = 0.90 * ambient_noise + 0.10 * volume
-                start_threshold = max(
-                    self.volume_threshold,
-                    ambient_noise * 2.2,
-                )
-
-                if volume >= start_threshold:
-                    consecutive_speech_blocks += 1
-                else:
-                    consecutive_speech_blocks = 0
-
-                if consecutive_speech_blocks >= required_speech_blocks:
-                    speech_started = True
-                    print("JARVIS: Speech detected.")
-                    audio_chunks.extend(pre_roll)
-                    recorded_frames = sum(len(c) for c in audio_chunks)
-
-                elif time.monotonic() >= speech_deadline:
-                    print("JARVIS: I didn't hear anything.")
+                # Check again after reading the audio block.
+                if stop_event is not None and stop_event.is_set():
                     return ""
 
-                continue
+                if overflowed:
+                    print("JARVIS: Audio buffer overflow; continuing.")
 
-            audio_chunks.append(raw_float)
-            recorded_frames += len(raw_float)
+                raw_block = np.asarray(block).reshape(-1)
+                if raw_block.dtype == np.int16:
+                    raw_float = raw_block.astype(np.float32) / 32768.0
+                else:
+                    raw_float = raw_block.astype(np.float32, copy=True)
 
-            silence_threshold = max(
-                0.006,
-                min(self.volume_threshold * 0.8, ambient_noise * 1.5),
-            )
+                volume = float(np.sqrt(np.mean(raw_float * raw_float)))
 
-            if volume < silence_threshold:
-                silent_blocks += 1
-            else:
-                silent_blocks = 0
+                if not speech_started:
+                    pre_roll.append(raw_float)
+                    ambient_noise = 0.90 * ambient_noise + 0.10 * volume
+                    start_threshold = max(
+                        self.volume_threshold,
+                        ambient_noise * 2.2,
+                    )
 
-            if silent_blocks >= silence_blocks_needed:
-                break
+                    if volume >= start_threshold:
+                        consecutive_speech_blocks += 1
+                    else:
+                        consecutive_speech_blocks = 0
 
-            if recorded_frames >= max_frames:
-                break
+                    if consecutive_speech_blocks >= required_speech_blocks:
+                        speech_started = True
+                        print("JARVIS: Speech detected.")
+                        audio_chunks.extend(pre_roll)
+                        recorded_frames = sum(len(c) for c in audio_chunks)
 
-    except KeyboardInterrupt:
-        print("\nJARVIS: Voice mode interrupted.")
-        raise
+                    elif time.monotonic() >= speech_deadline:
+                        print("JARVIS: I didn't hear anything.")
+                        return ""
 
-    finally:
-        if owned_stream is not None and not owned_stream.closed:
-            try:
-                owned_stream.close()
-            except Exception:
-                pass
+                    continue
 
-    # A cancelled recording must not be transcribed.
-    if stop_event is not None and stop_event.is_set():
-        return ""
+                audio_chunks.append(raw_float)
+                recorded_frames += len(raw_float)
 
-    if not speech_started or not audio_chunks:
-        return ""
+                silence_threshold = max(
+                    0.006,
+                    min(self.volume_threshold * 0.8, ambient_noise * 1.5),
+                )
 
-    audio = np.concatenate(audio_chunks, axis=0).reshape(-1)
+                if volume < silence_threshold:
+                    silent_blocks += 1
+                else:
+                    silent_blocks = 0
 
-    if len(audio) < self.sample_rate // 2:
-        print("JARVIS: I didn't catch enough speech.")
-        return ""
+                if silent_blocks >= silence_blocks_needed:
+                    break
 
-    # Suppress noise once on the complete continuous recording.
-    filtered_audio = self._suppress_noise(audio)
+                if recorded_frames >= max_frames:
+                    break
 
-    # Avoid starting transcription if cancellation arrived during filtering.
-    if stop_event is not None and stop_event.is_set():
-        return ""
+        except KeyboardInterrupt:
+            print("\nJARVIS: Voice mode interrupted.")
+            raise
 
-    return self._transcribe(filtered_audio)
+        finally:
+            if owned_stream is not None and not owned_stream.closed:
+                try:
+                    owned_stream.close()
+                except Exception:
+                    pass
+
+        # A cancelled recording must not be transcribed.
+        if stop_event is not None and stop_event.is_set():
+            return ""
+
+        if not speech_started or not audio_chunks:
+            return ""
+
+        audio = np.concatenate(audio_chunks, axis=0).reshape(-1)
+
+        if len(audio) < self.sample_rate // 2:
+            print("JARVIS: I didn't catch enough speech.")
+            return ""
+
+        # Suppress noise once on the complete continuous recording.
+        filtered_audio = self._suppress_noise(audio)
+
+        # Avoid starting transcription if cancellation arrived during filtering.
+        if stop_event is not None and stop_event.is_set():
+            return ""
+
+        return self._transcribe(filtered_audio)
 
 
     def listen_for_barge_in(
